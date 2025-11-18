@@ -1,2 +1,2 @@
 # ematools
-Functionality for EMA data
+Tools for interacting with European Medicines Agency (EMA) data.
