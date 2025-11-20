@@ -2,7 +2,7 @@
 Tools for interacting with European Medicines Agency (EMA) data.
 
 # installation
-clone the github repository and install it with pip / uv either through. PiPy package in progresss
+clone the github repository and install it either with pip / uv. PiPy package in progresss
 ```
 uv pip install .
 ```
