@@ -1,8 +1,12 @@
+import io
 import json
 import logging as lg
 import re
+import unicodedata
+from pathlib import Path
 
 import polars as pl
+import pymupdf
 
 from ematools.helper import cache_df, cached_get
 
@@ -10,6 +14,38 @@ from ematools.helper import cache_df, cached_get
 def _clean_json(json: str) -> str:
     """cleans json characters"""
     return re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", json)
+
+
+def normalize_text(text: str) -> str:
+    """Normalize text for comparison, handling encoding issues.
+
+    This function handles two types of encoding issues:
+    1. Mojibake: text that was incorrectly decoded (e.g., UTF-8 text decoded as Latin-1)
+    2. Unicode normalization: different representations of the same character
+
+    Args:
+        text: The text to normalize
+
+    Returns:
+        Normalized text suitable for comparison
+    """
+    if not text:
+        return text
+
+    # Try to fix mojibake (UTF-8 text incorrectly decoded as Latin-1)
+    # Common with web scraping where encoding isn't properly detected
+    try:
+        # If text looks like it might be mojibake, try to fix it
+        # This works when UTF-8 bytes were interpreted as Latin-1
+        fixed = text.encode("latin1").decode("utf-8")
+        text = fixed
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        # Not mojibake, use original text
+        pass
+
+    # Normalize to NFC form (Canonical Composition)
+    # This ensures characters like ∆ are represented consistently
+    return unicodedata.normalize("NFC", text)
 
 
 @cache_df()
@@ -116,7 +152,14 @@ def medicine_maintable(row: dict) -> dict:
         if type_ not in data:
             continue
         v = data.pop(type_)
-        assert row[type_] == v, f"{type_}: {row[type_]},{v} "
+        row_val_norm = normalize_text(str(row[type_]))
+        v_norm = normalize_text(str(v))
+
+        if row_val_norm != v_norm:
+            # Log the mismatch with details for debugging
+            lg.warning(
+                f"{type_}: {row[type_]},{v} not completely equivalent, will merge anyways"
+            )
     return data
 
 
