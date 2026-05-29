@@ -35,8 +35,10 @@ class TableInspectionTool:
         self.root.geometry("1600x900")
 
         # Data storage
-        self.pdf_files = []
-        self.csv_files = []
+        self.pdf_files = ["/Users/nollenl/ematools/examplefiles/product_newest.html"]
+        self.csv_files = [
+            "/Users/nollenl/ematools/visual_inspection/smpc_examples/camelot.csv"
+        ]
         self.current_index = 0
         self.labels = []
         self.labels_file = None

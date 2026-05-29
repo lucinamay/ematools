@@ -20,6 +20,7 @@ import requests
 MAINMODULE = pystow.module("ematools")
 CACHEDIR = MAINMODULE.join("cache")
 REQUESTDIR = MAINMODULE.join("cache", "requests")
+PDFDIR = MAINMODULE.join("cache", "pdfs")
 _log_lock = Lock()
 
 
@@ -63,7 +64,7 @@ def cache_df(folder: Path = CACHEDIR, cache_key: str | None = None) -> Callable:
     def decorator(func: Callable[..., pl.DataFrame]) -> Callable[..., pl.DataFrame]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> pl.DataFrame:
-            filename = cache_key if cache_key else func.__name__
+            filename = cache_key if cache_key else f"{func.__name__}_{func.__repr__}"
             filepath: Path = Path(folder) / f"{filename}.parquet"
 
             if filepath.exists():
@@ -84,6 +85,7 @@ def cached_get(
     force: bool = False,
     cache_dir: Path = REQUESTDIR,
     max_retries: int = 3,
+    suffix: str = "html",
 ) -> requests.Response:
     """Makes an HTTP GET request with caching.
 
@@ -106,7 +108,9 @@ def cached_get(
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
-    cache_file = cache_dir / f"{url.split('/')[-1].split('.')[0][:25]}_{url_hash}.html"
+    cache_file = (
+        cache_dir / f"{url.split('/')[-1].split('.')[0][:25]}_{url_hash}.{suffix}"
+    )
     log_file = cache_dir / "request_log.parquet"
 
     # Return cached response if available
@@ -115,12 +119,24 @@ def cached_get(
         response.status_code = 200
         response._content = cache_file.read_bytes()
         response.url = url
+        # Set encoding to utf-8 to ensure consistent decoding
+        response.encoding = "utf-8"
         return response
 
     # Make request with retries
     for attempt in range(max_retries):
         try:
             response = requests.get(url)
+
+            # Ensure consistent UTF-8 encoding
+            # requests may incorrectly detect encoding from headers
+            if response.encoding and response.encoding.lower() not in ["utf-8", "utf8"]:
+                lg.debug(
+                    f"Response encoding detected as {response.encoding}, forcing UTF-8"
+                )
+            response.encoding = "utf-8"
+
+            # Cache successful responses
             if response.status_code == 200:
                 cache_file.write_bytes(response.content)
 
@@ -148,12 +164,15 @@ def cached_get(
                         log_df = new_entry
                     log_df.write_parquet(log_file)
 
-                return response
+            # Return response regardless of status code (404, 500, etc.)
+            # This allows calling code to handle non-200 responses appropriately
+            return response
 
         except requests.RequestException as e:
             if attempt == max_retries - 1:
-                lg.warning(f"Attempt {attempt} on {url} with warning {e}")
+                lg.warning(f"Failed to fetch {url} after {max_retries} attempts: {e}")
                 raise
+            lg.debug(f"Attempt {attempt + 1}/{max_retries} failed for {url}: {e}")
             continue
 
     raise requests.RequestException(
@@ -174,7 +193,7 @@ def cached_pdf(link: str, stream=True) -> bytes | io.BytesIO:
     ---
         the pdf as io.BytesIO or bytes (if `stream==False`)
     """
-    response = cached_get(link)
+    response = cached_get(link, cache_dir=PDFDIR, suffix="pdf")
     pdf_bytes = response.content
     if stream:
         return io.BytesIO(pdf_bytes)
